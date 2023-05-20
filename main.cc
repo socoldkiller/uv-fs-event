@@ -20,7 +20,7 @@ class FileWatcher {
 
 private:
     static constexpr int MAX_DIFF_SIZE = 1 << 10;   // 最大比较文件变化个数
-    static constexpr int MAX_BUFF_SIZE = 1 << 10;   // 最大读取文件缓冲区大小
+    static constexpr int MAX_BUFF_SIZE = (1 << 10) + 1;   // 最大读取文件缓冲区大小
 
 private:
     std::string _dir;
@@ -79,7 +79,7 @@ private:
     static std::string fs_read_all(uv_loop_t *loop, const char *filename) {
         char buf[MAX_BUFF_SIZE]{0};
         uv_fs_t fs;
-        uv_buf_t iov = uv_buf_init(buf, sizeof(buf));
+        uv_buf_t iov = uv_buf_init(buf, sizeof(buf) - 1);
         int fd = uv_fs_open(loop, &fs, filename, O_RDONLY, 0, nullptr);
         std::string s;
         while (true) {
