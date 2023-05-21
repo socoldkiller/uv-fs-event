@@ -9,7 +9,6 @@
 #include <unordered_set>
 #include <vector>
 #include "unidiff.h"
-#include <functional>
 
 struct FileInfo {
     std::string fileName;
@@ -25,14 +24,17 @@ private:
     static constexpr int MAX_BUFF_SIZE = (1 << 10) + 1;   // 最大读取文件缓冲区大小
 
 private:
-    std::string _dir;
     uv_loop_t *_loop;
     uv_fs_event_t *_fs_event;
+
+public:
+    std::string _dir;
     bool _show;
-    std::vector<FileInfo *> _contents;
-    std::unordered_map<std::string, std::vector<FileInfo *>> _files;
+    std::vector<FileInfo *> _contents_versions;
+    std::unordered_map<std::string, std::vector<FileInfo *>> _files_versions;
     std::unordered_set<std::string> _suffix_files;
-    std::function<void(const string &)> _print_callback;
+    vector<std::function<void(FileWatcher *)>> _print_callbacks;
+    std::string now_changed_file;
 
 public:
     FileWatcher(const FileWatcher &) = delete;
@@ -64,10 +66,10 @@ public:
     }
 
     void show_title() const {
-        assert(!_contents.empty());
+        assert(!_contents_versions.empty());
         char buffer[80]{0};
         std::fill(buffer, buffer + 80, 0);
-        auto info = _contents.back();
+        auto info = _contents_versions.back();
         auto now_c = std::chrono::system_clock::to_time_t(info->timeval);
         auto now_tm = std::localtime(&now_c);
         std::strftime(buffer, 80, "%Y-%m-%d %H:%M:%S", now_tm);
@@ -75,12 +77,15 @@ public:
     }
 
 
-    void set_printCallback(function<void(const string &)> callback) {
-        _print_callback = callback;
+    template<typename F = function<void>(const FileWatcher *), typename ...Fs>
+    void set_printCallbacks(F callback, Fs ... callbacks) {
+        _print_callbacks.push_back(callback);
+        if constexpr (sizeof...(Fs) > 0)
+            _print_callbacks.push_back({callbacks...});
     }
 
     ~FileWatcher() {
-        for (auto &c: _contents)
+        for (auto &c: _contents_versions)
             delete c;
         uv_stop(_loop);
         uv_loop_close(_loop);
@@ -110,9 +115,9 @@ private:
     }
 
     void show_same_file_version(const std::string &fileName) const {
-        auto iterator = _files.find(fileName);
+        auto iterator = _files_versions.find(fileName);
 
-        if (iterator == _files.end()) {
+        if (iterator == _files_versions.end()) {
             return;
         }
 
@@ -123,43 +128,15 @@ private:
         }
     }
 
-
-    void show_diff_file_content(const std::string &fileName) const {
-        auto iterator = _files.find(fileName);
-
-        if (iterator == _files.end()) {
-            return;
-        }
-
-        auto &files = iterator->second;
-
-        if (files.size() <= 1) {
-            return;
-        }
-
-        size_t last = files.size() - 1;
-        size_t last_two = last - 1;
-        unifiedDiff(files[last_two]->content, files[last]->content);
-        printf("\n\n\n\n");
-    }
-
-
     void add_file_info(const FileInfo &info) {
-        if (_contents.size() > MAX_DIFF_SIZE) {
+        if (_contents_versions.size() > MAX_DIFF_SIZE) {
             contents_clear();
-            _files.clear();
+            _files_versions.clear();
         }
 
         auto *inf = new FileInfo(info);
-        _contents.emplace_back(inf);
-        _files[info.fileName].emplace_back(inf);
-    }
-
-
-    static void on_fs_event(uv_fs_event_t *handle, const char *filename, int events, int status) {
-        assert(handle->data);
-        auto fw = static_cast<FileWatcher *>(handle->data);
-        fw->_on_fs_event(handle, filename, events, status);
+        _contents_versions.emplace_back(inf);
+        _files_versions[info.fileName].emplace_back(inf);
     }
 
     string get_suffix_fileName(const string &fileName) {
@@ -172,6 +149,12 @@ private:
         }
 
         return suffix;
+    }
+
+    static void on_fs_event(uv_fs_event_t *handle, const char *filename, int events, int status) {
+        assert(handle->data);
+        auto fw = static_cast<FileWatcher *>(handle->data);
+        fw->_on_fs_event(handle, filename, events, status);
     }
 
 
@@ -187,21 +170,18 @@ private:
         if (_suffix_files.find(suffix) == _suffix_files.end()) {
             return;
         }
+        now_changed_file = filename;
+        std::string content = fs_read_all(handle->loop, filename);
+        add_file_info({
+                              .fileName = filename,
+                              .content =content,
+                              .timeval = std::chrono::system_clock::now()
+                      });
 
-        if (events & UV_CHANGE) {
-            std::string content = fs_read_all(handle->loop, filename);
-            add_file_info({
-                                  .fileName = filename,
-                                  .content =content,
-                                  .timeval = std::chrono::system_clock::now()
-                          });
-
-            if (_show && !_contents.empty()) {
-                if (_print_callback) {
-                    _print_callback(filename);
-                } else {
-                    show_title();
-                    show_diff_file_content(filename);
+        if (_show && !_contents_versions.empty()) {
+            if (!_print_callbacks.empty()) {
+                for (const auto &callback: _print_callbacks) {
+                    callback(this);
                 }
             }
         }
@@ -217,19 +197,47 @@ private:
     }
 
     void contents_clear() {
-        for (auto &content: _contents)
+        for (auto &content: _contents_versions)
             delete content;
-        _contents.clear();
+        _contents_versions.clear();
     }
 };
 
 
+void show_diff_file_content(const FileWatcher *watcher) {
+    assert(watcher);
+    auto iterator = watcher->_files_versions.find(watcher->now_changed_file);
+    if (iterator == watcher->_files_versions.end()) {
+        return;
+    }
 
+    auto &files = iterator->second;
+
+    if (files.size() <= 1) {
+        return;
+    }
+
+    size_t last = files.size() - 1;
+    size_t last_two = last - 1;
+    unifiedDiff(files[last_two]->content, files[last]->content);
+    printf("\n\n\n\n");
+}
+
+void show_title(const FileWatcher *watcher) {
+    assert(watcher);
+    char buffer[80]{0};
+    std::fill(buffer, buffer + 80, 0);
+    auto info = watcher->_contents_versions.back();
+    auto now_c = std::chrono::system_clock::to_time_t(info->timeval);
+    auto now_tm = std::localtime(&now_c);
+    std::strftime(buffer, 80, "%Y-%m-%d %H:%M:%S", now_tm);
+    printf("The file [%s] was modified at %s\n", info->fileName.c_str(), buffer);
+}
 
 int main(int argc, char **argv) {
     FileWatcher watcher;
     watcher.add_file_suffix({"txt", "cc", "c"});
-
+    watcher.set_printCallbacks(show_title, show_diff_file_content);
     watcher.watch();
 }
 
