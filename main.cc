@@ -58,24 +58,18 @@ public:
         uv_run(_loop, UV_RUN_DEFAULT);
     }
 
+    void stop_watch() const {
+        printf("good bye");
+        uv_stop(_loop);
+    }
+
+
     void add_file_suffix(const vector<string> &files) {
         for (auto &file: files) {
             _suffix_files.insert(file);
         }
 
     }
-
-    void show_title() const {
-        assert(!_contents_versions.empty());
-        char buffer[80]{0};
-        std::fill(buffer, buffer + 80, 0);
-        auto info = _contents_versions.back();
-        auto now_c = std::chrono::system_clock::to_time_t(info->timeval);
-        auto now_tm = std::localtime(&now_c);
-        std::strftime(buffer, 80, "%Y-%m-%d %H:%M:%S", now_tm);
-        printf("The file [%s] was modified at %s\n", info->fileName.c_str(), buffer);
-    }
-
 
     template<typename F = function<void>(const FileWatcher *), typename ...Fs>
     void set_printCallbacks(F callback, Fs ... callbacks) {
@@ -94,8 +88,6 @@ public:
 
 
 private:
-
-
     static std::string fs_read_all(uv_loop_t *loop, const char *filename) {
         char buf[MAX_BUFF_SIZE]{0};
         uv_fs_t fs;
@@ -139,7 +131,7 @@ private:
         _files_versions[info.fileName].emplace_back(inf);
     }
 
-    string get_suffix_fileName(const string &fileName) {
+    string get_suffix_fileName(const string &fileName) const {
         size_t dot_pos = fileName.rfind('.');
         string suffix;
         if (dot_pos == std::string::npos) {
@@ -183,17 +175,13 @@ private:
                 for (const auto &callback: _print_callbacks) {
                     callback(this);
                 }
+                return;
             }
+            auto print = [] {
+                printf("please set print_callback");
+            };
+            print();
         }
-    }
-
-    void first_read(const string &fileName) {
-        string content = fs_read_all(_loop, fileName.c_str());
-        add_file_info({
-                              .fileName = fileName,
-                              .content =content,
-                              .timeval = std::chrono::system_clock::now()
-                      });
     }
 
     void contents_clear() {
