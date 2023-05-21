@@ -6,8 +6,10 @@
 #include <uv.h>
 #include <cassert>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include "unidiff.h"
+#include <functional>
 
 struct FileInfo {
     std::string fileName;
@@ -27,9 +29,10 @@ private:
     uv_loop_t *_loop;
     uv_fs_event_t *_fs_event;
     bool _show;
-
     std::vector<FileInfo *> _contents;
     std::unordered_map<std::string, std::vector<FileInfo *>> _files;
+    std::unordered_set<std::string> _suffix_files;
+    std::function<void(const string &)> _print_callback;
 
 public:
     FileWatcher(const FileWatcher &) = delete;
@@ -53,6 +56,13 @@ public:
         uv_run(_loop, UV_RUN_DEFAULT);
     }
 
+    void add_file_suffix(const vector<string> &files) {
+        for (auto &file: files) {
+            _suffix_files.insert(file);
+        }
+
+    }
+
     void show_title() const {
         assert(!_contents.empty());
         char buffer[80]{0};
@@ -62,6 +72,11 @@ public:
         auto now_tm = std::localtime(&now_c);
         std::strftime(buffer, 80, "%Y-%m-%d %H:%M:%S", now_tm);
         printf("The file [%s] was modified at %s\n", info->fileName.c_str(), buffer);
+    }
+
+
+    void set_printCallback(function<void(const string &)> callback) {
+        _print_callback = callback;
     }
 
     ~FileWatcher() {
@@ -90,7 +105,6 @@ private:
             if (read_req.result == 0) {
                 break;
             }
-            fill(buf, buf + MAX_BUFF_SIZE, 0);
         }
         return s;
     }
@@ -148,11 +162,29 @@ private:
         fw->_on_fs_event(handle, filename, events, status);
     }
 
+    string get_suffix_fileName(const string &fileName) {
+        size_t dot_pos = fileName.rfind('.');
+        string suffix;
+        if (dot_pos == std::string::npos) {
+            suffix = "";
+        } else {
+            suffix = fileName.substr(dot_pos + 1);
+        }
+
+        return suffix;
+    }
+
 
     void _on_fs_event(uv_fs_event_t *handle, const char *filename, int events, int status) {
         assert(_loop == handle->loop);
         if (status < 0) {
             fprintf(stderr, "Error watching file: %s\n", uv_strerror(status));
+            exit(1);
+            return;
+        }
+
+        string suffix = get_suffix_fileName(filename);
+        if (_suffix_files.find(suffix) == _suffix_files.end()) {
             return;
         }
 
@@ -165,8 +197,12 @@ private:
                           });
 
             if (_show && !_contents.empty()) {
-                show_title();
-                show_diff_file_content(filename);
+                if (_print_callback) {
+                    _print_callback(filename);
+                } else {
+                    show_title();
+                    show_diff_file_content(filename);
+                }
             }
         }
     }
@@ -180,18 +216,20 @@ private:
                       });
     }
 
-
     void contents_clear() {
         for (auto &content: _contents)
             delete content;
         _contents.clear();
     }
-
-
 };
+
+
+
 
 int main(int argc, char **argv) {
     FileWatcher watcher;
+    watcher.add_file_suffix({"txt", "cc", "c"});
+
     watcher.watch();
 }
 
