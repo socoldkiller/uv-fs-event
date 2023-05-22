@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <ctime>
 #include <string>
+#include <fstream>
 #include <uv.h>
 #include <cassert>
 #include <unordered_map>
@@ -13,14 +14,39 @@
 
 struct FileInfo {
     std::string fileName;
-    std::string content;
+    std::string contents;
     std::chrono::time_point<std::chrono::system_clock> timeval;
+public:
+    FileInfo() = delete;
+
+    FileInfo(const FileInfo &) = default;
+
+    FileInfo &operator=(const FileInfo &) = delete;
+
+    FileInfo(const std::string &fileName) {
+        this->fileName = fileName;
+        timeval = std::chrono::system_clock::now();
+        read_all_contents();
+    }
+
+private:
+    void read_all_contents() {
+        std::FILE *fp = std::fopen(fileName.c_str(), "r");
+        if (fp) {
+            std::fseek(fp, 0, SEEK_END);
+            contents.resize(std::ftell(fp));
+            std::rewind(fp);
+            std::fread(&contents[0], 1, contents.size(), fp);
+            std::fclose(fp);
+        }
+    }
+
 };
 
 class FileWatcher {
 
 private:
-    static constexpr int MAX_DIFF_SIZE = 1 << 10;   // 最大比较文件变化个数
+    static constexpr int MAX_DIFF_SIZE = 1 << 4;   // 最大比较文件变化个数
     static constexpr int MAX_BUFF_SIZE = (1 << 10) + 1;   // 最大读取文件缓冲区大小
 
 private:
@@ -101,24 +127,6 @@ public:
 
 
 private:
-    static std::string fs_read_all(uv_loop_t *loop, const char *filename) {
-        char buf[MAX_BUFF_SIZE]{0};
-        uv_fs_t fs;
-        uv_buf_t iov = uv_buf_init(buf, sizeof(buf) - 1);
-        int fd = uv_fs_open(loop, &fs, filename, O_RDONLY, 0, nullptr);
-        std::string s;
-        while (true) {
-            std::fill(buf, buf + MAX_BUFF_SIZE, 0);
-            uv_fs_t read_req;
-            uv_fs_read(loop, &read_req, fd, &iov, 1, -1, nullptr);
-            s += iov.base;
-            if (read_req.result <= 0) {
-                break;
-            }
-        }
-        return s;
-    }
-
     void show_same_file_version(const std::string &fileName) const {
         auto iterator = _files_versions.find(fileName);
 
@@ -140,11 +148,7 @@ private:
                 std::string ext = get_suffix_fileName(fileName);
                 if (_suffix_files.find(ext) == _suffix_files.end())
                     continue;
-                add_file_info({
-                                      .fileName =fileName,
-                                      .content =fs_read_all(this->_loop, fileName.c_str()),
-                                      .timeval = std::chrono::system_clock::now()
-                              });
+                add_file_info(FileInfo(fileName));
             }
         }
     }
@@ -186,13 +190,7 @@ private:
         if (_suffix_files.find(suffix) == _suffix_files.end())
             return;
         _now_changed_file = filename;
-        std::string content = fs_read_all(handle->loop, filename);
-        add_file_info({
-                              .fileName = filename,
-                              .content =content,
-                              .timeval = std::chrono::system_clock::now()
-                      });
-
+        add_file_info(FileInfo(filename));
         if (_show && !_files_versions.empty()) {
             if (!_print_callbacks.empty()) {
                 for (const auto &callback: _print_callbacks) {
@@ -223,16 +221,14 @@ void show_diff_file_content(const FileWatcher *watcher) {
     if (iterator == watcher->_files_versions.end()) {
         return;
     }
-
     const auto &files = iterator->second;
 
     if (files.size() <= 1) {
         return;
     }
-
-    size_t last = files.size() - 1;
-    size_t last_two = last - 1;
-    unifiedDiff(files[last_two]->content, files[last]->content);
+    size_t second = files.size() - 1;
+    size_t first = second - 1;
+    unifiedDiff(files[first]->contents, files[second]->contents);
     printf("\n\n\n\n");
 }
 
