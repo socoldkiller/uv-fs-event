@@ -1,5 +1,7 @@
-
+#include <functional>
 #include "dtl.hpp"
+#include "Diff.hpp"
+#include "functors.hpp"
 #include "variables.hpp"
 #include <algorithm>
 #include <iostream>
@@ -11,7 +13,6 @@ using namespace std;
 using dtl::Diff;
 using dtl::elemInfo;
 using dtl::uniHunk;
-
 
 
 static std::vector<string> splitLine(const string &s) {

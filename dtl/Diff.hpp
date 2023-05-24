@@ -68,6 +68,7 @@ namespace dtl {
         comparator cmp;
         long long ox;
         long long oy;
+        std::function<void(const uniHunk<sesElem> &)> print_callback;
     public :
         Diff() {}
 
@@ -96,6 +97,11 @@ namespace dtl {
         }
 
         ~Diff() {}
+
+
+        void set_print_callback(std::function<void(uniHunk<sesElem>)> callback) {
+            print_callback = callback;
+        }
 
         long long getEditDistance() const {
             return editDistance;
@@ -358,6 +364,12 @@ namespace dtl {
          */
         template<typename stream>
         void printUnifiedFormat(stream &out) const {
+
+            if (print_callback) {
+                for_each(uniHunks.begin(), uniHunks.end(), print_callback);
+                return;
+            }
+
             for_each(uniHunks.begin(), uniHunks.end(), UniHunkPrinter<sesElem, stream>(out));
         }
 

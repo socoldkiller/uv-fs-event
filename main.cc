@@ -2,14 +2,15 @@
 #include <chrono>
 #include <cstdio>
 #include <ctime>
+#include <iostream>
 #include <string>
-#include <fstream>
 #include <uv.h>
 #include <cassert>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 #include <filesystem>
+#include "dtl/Color.hpp"
 #include "unidiff.h"
 
 struct FileInfo {
@@ -124,8 +125,6 @@ public:
         uv_loop_close(_loop);
         delete _fs_event;
     }
-
-
 private:
     void show_same_file_version(const std::string &fileName) const {
         auto iterator = _files_versions.find(fileName);
@@ -240,7 +239,8 @@ void show_title(const FileWatcher *watcher) {
     auto now_c = std::chrono::system_clock::to_time_t(info->timeval);
     auto now_tm = std::localtime(&now_c);
     std::strftime(buffer, 80, "%Y-%m-%d %H:%M:%S", now_tm);
-    printf("The file [%s] was modified at %s\n", info->fileName.c_str(), buffer);
+    printf("\033[33m The file [%s] was modified at %s\n", info->fileName.c_str(), buffer);
+    dtl::resetColor(cout);
 }
 
 int main(int argc, char **argv) {
