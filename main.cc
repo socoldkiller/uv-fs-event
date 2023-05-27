@@ -44,15 +44,43 @@ private:
 
 };
 
+
+struct ConfigurationFileWatcher {
+public:
+    bool is_show;                               //是否展示
+    bool is_recursive;                          //是否递归遍历文件
+    bool is_pre_read;                           //是否进行预读
+    const int MAX_DIFF;                         // 最大比较文件变化个数
+    const int MAX_BUFF;                         // 最大读取文件缓冲区大小
+    std::vector<std::string> _suffix_files;     //监听的文件后缀
+    string root;                                //监听的根节点
+};
+
 class FileWatcher {
 
 private:
-    static constexpr int MAX_DIFF_SIZE = 1 << 4;   // 最大比较文件变化个数
-    static constexpr int MAX_BUFF_SIZE = (1 << 10) + 1;   // 最大读取文件缓冲区大小
+    int MAX_DIFF_SIZE;   // 最大比较文件变化个数
+    int MAX_BUFF_SIZE;  // 最大读取文件缓冲区大小
 
 private:
     uv_loop_t *_loop;
     uv_fs_event_t *_fs_event;
+
+private:
+    void init_loop() {
+        _fs_event = new uv_fs_event_t;
+        uv_fs_event_init(_loop, _fs_event);
+        _fs_event->data = this;
+        int flag = _is_recursive ? UV_FS_EVENT_RECURSIVE : 0;
+        uv_fs_event_start(_fs_event, on_fs_event, _dir.c_str(), flag);
+    }
+
+private:
+    function<void(const FileWatcher *)> default_print_callback;
+
+    static void _default_call_back(const FileWatcher *) {
+        ::printf("please set callback\n");
+    }
 
 public:
     std::string _dir;
@@ -62,6 +90,7 @@ public:
     std::vector<std::function<void(FileWatcher *)>> _print_callbacks;
     std::string _now_changed_file;
     bool _is_pre_read;
+    bool _is_recursive;
 
 public:
     FileWatcher(const FileWatcher &) = delete;
@@ -75,19 +104,32 @@ public:
     explicit FileWatcher(const std::string &dir = ".", bool show = true) : _dir(dir),
                                                                            _loop(uv_default_loop()),
                                                                            _show(show) {
-        _fs_event = new uv_fs_event_t;
-        uv_fs_event_init(_loop, _fs_event);
-        _fs_event->data = this;
-        uv_fs_event_start(_fs_event, on_fs_event, dir.c_str(), UV_FS_EVENT_RECURSIVE);
+        init_loop();
+        default_print_callback = _default_call_back;
+    }
+
+    explicit FileWatcher(const ConfigurationFileWatcher &config) : _loop(uv_default_loop()) {
+        _dir = config.root;
+        _show = config.is_show;
+        _is_pre_read = config.is_pre_read;
+        _is_recursive = config.is_recursive;
+        auto &_suffix = config._suffix_files;
+        _suffix_files = std::move(unordered_set(_suffix.begin(), _suffix.end()));
+        MAX_DIFF_SIZE = config.MAX_DIFF ? config.MAX_DIFF : 1 << 4;
+        MAX_BUFF_SIZE = config.MAX_BUFF ? config.MAX_BUFF : (1 << 10) + 1;
+        if (_is_pre_read)
+            pre_read_files();
+        init_loop();
     }
 
     /**
      * 预先读取所有文件 用以最开始进行比较的情况
      **/
     void pre_read_files() {
+        namespace fs = std::filesystem;
         const std::string &root = _dir;
-        traverseDirectory(root);
-        _is_pre_read = true;
+        _is_recursive ? traverseDirectory<fs::recursive_directory_iterator>(root)
+                      : traverseDirectory<fs::directory_iterator>(root);
     }
 
 
@@ -125,6 +167,7 @@ public:
         uv_loop_close(_loop);
         delete _fs_event;
     }
+
 private:
     void show_same_file_version(const std::string &fileName) const {
         auto iterator = _files_versions.find(fileName);
@@ -140,8 +183,9 @@ private:
         }
     }
 
+    template<typename Iterator>
     void traverseDirectory(const std::filesystem::path &path) {
-        for (const auto &file: std::filesystem::recursive_directory_iterator(path)) {
+        for (const auto &file: Iterator(path)) {
             if (file.is_regular_file()) {
                 std::string fileName = file.path().lexically_normal();
                 std::string ext = get_suffix_fileName(fileName);
@@ -191,16 +235,12 @@ private:
         _now_changed_file = filename;
         add_file_info(FileInfo(filename));
         if (_show && !_files_versions.empty()) {
-            if (!_print_callbacks.empty()) {
-                for (const auto &callback: _print_callbacks) {
-                    callback(this);
-                }
-                return;
+            if (_print_callbacks.empty())
+                _print_callbacks.push_back(default_print_callback);
+            for (const auto &callback: _print_callbacks) {
+                callback(this);
             }
-            auto print = [] {
-                printf("please set print_callback");
-            };
-            print();
+            return;
         }
     }
 
@@ -227,7 +267,7 @@ void show_diff_file_content(const FileWatcher *watcher) {
     }
     size_t second = files.size() - 1;
     size_t first = second - 1;
-    unifiedDiff(files[first]->contents, files[second]->contents);
+    diff_file_by_lines(files[first]->contents, files[second]->contents);
     printf("\n\n\n\n");
 }
 
@@ -244,10 +284,15 @@ void show_title(const FileWatcher *watcher) {
 }
 
 int main(int argc, char **argv) {
-    FileWatcher watcher;
-    watcher.add_file_suffix({"txt", "cc", "c", "h"});
+    FileWatcher watcher(ConfigurationFileWatcher{
+            .is_show =          true,
+            .is_recursive =     true,
+            .is_pre_read =      true,
+            ._suffix_files =    {"cc", "h", "txt", "hpp"},
+            .root =             "."
+
+    });
     watcher.set_printCallbacks(show_title, show_diff_file_content);
-    watcher.pre_read_files();
     watcher.watch();
 }
 

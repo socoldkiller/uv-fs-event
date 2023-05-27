@@ -25,11 +25,11 @@ static std::vector<string> splitLine(const string &s) {
     return lines;
 }
 
-static void unifiedDiff(const string &fp1, const string &fp2) {
+static void diff_file_by_lines(const string &alines, const string &blines) {
     vector<string> ALines, BLines;
     using sesElem = std::pair<string, dtl::elemInfo>;
-    ALines = splitLine(fp1);
-    BLines = splitLine(fp2);
+    ALines = splitLine(alines);
+    BLines = splitLine(blines);
     Diff<string> diff(ALines, BLines);
     diff.onHuge();
     diff.compose();
