@@ -14,7 +14,7 @@ namespace dtl {
         WHITE
     };
 
-// 重载运算符 <<，用于输出彩色文本
+// 重载运算符 <<，用于输出彩色文本////
     std::ostream &operator<<(std::ostream &os, TextColor color) {
         switch (color) {
             case TextColor::BLACK:

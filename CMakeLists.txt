@@ -1,12 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 project(learn_uv)
-
 set(CMAKE_CXX_STANDARD 17)
-
 include_directories(dtl)
 include_directories(/usr/local/include)
-add_executable(learn_uv main.cc )
-
-
-
+add_executable(learn_uv  FileWatcher.hpp main.cc)
 target_link_libraries(learn_uv /usr/local/lib/libuv.a)
